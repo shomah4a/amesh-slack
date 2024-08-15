@@ -12,10 +12,10 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: package.zip
-      Handler: lambda_function.lambda_handler
+      Handler: slackhandler.lambda_handler
       Runtime: python3.12
       Timeout: 10
-      MemorySize: 256
+      MemorySize: 1024
       Environment:
         Variables:
           SLACK_SIGNING_SECRET: !Ref SlackSigningSecret
@@ -30,8 +30,3 @@ Resources:
             - content-type
             - x-slack-signature
             - x-slack-request-timestamp
-
-Outputs:
-  SlackFunctionUrl:
-    Description: "Lambda Function URL for Slack Slash Command"
-    Value: !GetAtt SlackCommandFunction.FunctionUrl
