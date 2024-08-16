@@ -1,89 +1,105 @@
+import base64
 import datetime
 import json
 import os
 import urllib.parse
-from typing import Dict, Any
-
 import hashlib
 import hmac
 import time
 from typing import Dict, Any
+from io import BytesIO
+
+from PIL import Image
+
+import boto3
 
 
 import amesh
 
 
-AMESH_URL = 'https://tokyo-ame.jwa.or.jp/'
 SLACK_SIGNING_SECRET = os.environ['SLACK_SIGNING_SECRET']
+QUEUE_URL = os.environ['QUEUE_URL']
 
 
-def verify_slack_request(event: Dict[str, Any], signing_secret: str) -> bool:
+def verify_slack_request(event, slack_signing_secret=SLACK_SIGNING_SECRET):
     slack_signature = event['headers'].get('x-slack-signature', '')
     slack_request_timestamp = event['headers'].get('x-slack-request-timestamp', '')
 
-    if abs(time.time() - int(slack_request_timestamp)) > 60 * 5:
+    if slack_signing_secret is None:
+        slack_signing_secret = os.environ.get('SLACK_SIGNING_SECRET')
+
+    b64decoded_body = base64.decodebytes(event['body'].encode()).decode()
+
+    if not slack_signature or not slack_request_timestamp:
+        print("Missing required headers")
         return False
 
-    sig_basestring = f"v0:{slack_request_timestamp}:{event['body']}"
+    if abs(time.time() - int(slack_request_timestamp)) > 60 * 5:
+        print("Request is too old")
+        return False
 
-    my_signature = 'v0=' + hmac.new(
-        SLACK_SIGNING_SECRET.encode(),
+    sig_basestring = f"v0:{slack_request_timestamp}:{b64decoded_body}"
+
+    print('basestring:', sig_basestring)
+    calculated_signature = 'v0=' + hmac.new(
+        slack_signing_secret.encode(),
         sig_basestring.encode(),
         hashlib.sha256
     ).hexdigest()
 
-    return hmac.compare_digest(my_signature, slack_signature)
+    print(f"Calculated signature: {calculated_signature}")
+
+    if hmac.compare_digest(calculated_signature, slack_signature):
+        print("Signature verified successfully")
+        return True
+    else:
+        print("Signature verification failed")
+        return False
 
 
-def make_response(img: Image.Image, url: str) -> Dict[str, Any]:
-    buffered = BytesIO()
-    img.save(buffered, format="JPG", optimized=True)
-    img_str = base64.b64encode(buffered.getvalue()).decode()
+def put_queue(params: Dict):
 
-    response = {
-        "response_type": "in_channel",
-        "blocks": [
-            {
-                "type": "image",
-                "image_url": f"data:image/png;base64,{img_str}",
-                "alt_text": "amesh"
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": url
-                }
-            }
-        ]
-    }
-    return response
+    # 非同期処理のためのメッセージをSQSに送信
+    sqs = boto3.client('sqs')
+    sqs.send_message(
+        QueueUrl=QUEUE_URL,
+        MessageBody=json.dumps(params)
+    )
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    body = event.get('body', '')
+    body = base64.decodebytes(event.get('body', '').encode()).decode()
     params = dict(urllib.parse.parse_qsl(body))
 
+    print(json.dumps(event))
+    print(params)
+
     if not verify_slack_request(event):
+        print('verify failed')
         return {
             'statusCode': 403,
             'body': json.dumps({'error': 'Invalid request signature'})
         }
 
-    command = params.get('command', '').lstrip('/')
-    text = params.get('text', '')
+    print('verified')
 
-    now = datetime.datetime.now()
+    response_url = params['response_url']
+    user_id = params['user_id']
 
-    amesh_image = generate_amesh_image(now)
+    put_queue(params)
 
-    response_body = make_response(
-        amesh_image,
-        AMESH_URL
-    )
-
-    return {
-        'statusCode': 200,
-        'headers': {'Content-Type': 'application/json'},
-        'body': json.dumps(response_body)
+    payload = {
+        "response_type": "ephemeral",
+        "text": "",
+        "blocks": []
     }
+
+    response = {
+        'statusCode': 204,
+        'headers': {'Content-Type': 'text/plain'},
+        'body': ''
+    }
+
+    print(json.dumps(response))
+
+    return response

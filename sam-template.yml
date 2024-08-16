@@ -6,6 +6,9 @@ Parameters:
   SlackSigningSecret:
     Type: String
     Description: Slack Signing Secret for request verification
+  SlackBotToken:
+    Type: String
+    Description: Slack Signing Secret for request verification
 
 Resources:
   AmeshSlackCommand:
@@ -15,10 +18,11 @@ Resources:
       Handler: slackhandler.lambda_handler
       Runtime: python3.12
       Timeout: 10
-      MemorySize: 1024
+      MemorySize: 512
       Environment:
         Variables:
           SLACK_SIGNING_SECRET: !Ref SlackSigningSecret
+          QUEUE_URL: !Ref ProcessingQueue
       FunctionUrlConfig:
         AuthType: NONE
         Cors:
@@ -30,3 +34,31 @@ Resources:
             - content-type
             - x-slack-signature
             - x-slack-request-timestamp
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt ProcessingQueue.QueueName
+
+  AsyncProcessingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: package.zip
+      Handler: ameshlambda.lambda_handler
+      Runtime: python3.12
+      Timeout: 20
+      MemorySize: 1024
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ProcessingQueue.Arn
+            BatchSize: 1
+
+      Environment:
+        Variables:
+          SLACK_BOT_TOKEN: !Ref SlackBotToken
+
+
+  ProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: SlackProcessQueue

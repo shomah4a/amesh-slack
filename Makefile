@@ -1,6 +1,7 @@
 .PHONY: clean amesh
 
 SIGNING_SECRET=$(shell cat slack_signing_secret)
+BOT_TOKEN=$(shell cat slack_bot_token)
 
 python/bin/python3:
 	python3 -m venv python
@@ -13,7 +14,7 @@ amesh:
 
 package.zip: clean
 	-mkdir dist
-	cp amesh.py slackhandler.py dist
+	cp amesh.py slackhandler.py ameshlambda.py dist
 	cp -r python/lib/python*/site-packages/* dist
 	cd dist && zip -r ../package.zip ./*
 
@@ -25,4 +26,4 @@ deploy: package.zip
 		--stack-name slack-command-stack \
 		--capabilities CAPABILITY_IAM \
 		--resolve-s3 \
-		--parameter-overrides SlackSigningSecret=$(SIGNING_SECRET)
+		--parameter-overrides SlackSigningSecret=$(SIGNING_SECRET) SlackBotToken=$(BOT_TOKEN)
